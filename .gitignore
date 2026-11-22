@@ -1,0 +1,4 @@
+# 使用者的表格照片樣本不放進 public repo
+samples/
+# Claude Code 本機預覽設定
+.claude/

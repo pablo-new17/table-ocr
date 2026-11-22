@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>表格 OCR 自動測試</title>
+  <style>
+    body { font: 14px/1.5 system-ui, "Microsoft JhengHei", sans-serif; padding: 16px; background: #fff; color: #1f2328; }
+    table { border-collapse: collapse; margin: 8px 0 16px; }
+    td, th { border: 1px solid #d1d9e0; padding: 4px 8px; white-space: pre-wrap; }
+    .pass { color: #1a7f37; } .fail { color: #cf222e; }
+    canvas { max-width: 100%; border: 1px solid #d1d9e0; }
+  </style>
+</head>
+<body>
+  <h1>表格 OCR 自動測試</h1>
+  <p id="status">執行中…</p>
+  <div id="out"></div>
+
+  <script src="../vendor/opencv.js" async></script>
+  <script src="../vendor/ort.wasm.min.js"></script>
+  <script src="../vendor/xlsx.full.min.js"></script>
+  <script type="module">
+    import { waitForOpenCV } from '../js/cv-ready.js';
+    import { PPOCR } from '../js/ocr.js';
+    import { runPipeline } from '../js/pipeline.js';
+    import { buildXlsxBlob } from '../js/export.js';
+
+    const EXPECTED = [
+      ['品名', '數量', '單價', '備註'],
+      ['螺絲', '120', '3.5', '不鏽鋼'],
+      ['電阻', '2500', '0.12', '一千歐姆'],
+      ['電容器', '48', '15', '陶瓷'],
+      ['連接線', '7', '89', '黑色'],
+    ];
+
+    // 畫一張有框線的表格
+    function drawTable(ctx, x, y, cellW, cellH, rows) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x, y, cellW * rows[0].length, cellH * rows.length);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      for (let r = 0; r <= rows.length; r++) {
+        ctx.beginPath(); ctx.moveTo(x, y + r * cellH); ctx.lineTo(x + cellW * rows[0].length, y + r * cellH); ctx.stroke();
+      }
+      for (let c = 0; c <= rows[0].length; c++) {
+        ctx.beginPath(); ctx.moveTo(x + c * cellW, y); ctx.lineTo(x + c * cellW, y + cellH * rows.length); ctx.stroke();
+      }
+      ctx.fillStyle = '#000000';
+      ctx.font = '40px "Microsoft JhengHei", "Noto Sans TC", sans-serif';
+      ctx.textBaseline = 'middle';
+      rows.forEach((row, r) => row.forEach((text, c) => {
+        ctx.fillText(text, x + c * cellW + 20, y + r * cellH + cellH / 2);
+      }));
+    }
+
+    // 測試 1：乾淨的表格
+    function case1() {
+      const cv = document.createElement('canvas');
+      cv.width = 1400; cv.height = 700;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+      drawTable(ctx, 50, 50, 320, 110, EXPECTED);
+      return cv;
+    }
+
+    // 測試 2：白紙放在深色桌面上，紙張旋轉 4 度（模擬手機拍歪）
+    function case2() {
+      const cv = document.createElement('canvas');
+      cv.width = 1800; cv.height = 1200;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#5a4632'; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.translate(900, 600); ctx.rotate(4 * Math.PI / 180); ctx.translate(-760, -420);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 1520, 840);
+      drawTable(ctx, 60, 70, 350, 130, EXPECTED);
+      return cv;
+    }
+
+    // 測試 3：白底、表格斜 2.5 度（找不到紙張邊緣，不裁切）、表格上方有標題、月份那一列是合併儲存格
+    const EXPECTED3 = [
+      ['業績記錄表', '', '', ''],
+      ['一月', '', '二月', ''],
+      ['日期', '姓名', '日期', '姓名'],
+      ['3', '王小明', '5', '陳大華'],
+      ['12', '林美玲', '28', '張志強'],
+    ];
+    const MERGES3 = [{ r: 1, c: 0, rs: 1, cs: 2 }, { r: 1, c: 2, rs: 1, cs: 2 }];
+    function case3() {
+      const cv = document.createElement('canvas');
+      cv.width = 1500; cv.height = 900;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.translate(750, 450); ctx.rotate(2.5 * Math.PI / 180); ctx.translate(-750, -450);
+      ctx.fillStyle = '#000000';
+      ctx.font = '48px "Microsoft JhengHei", "Noto Sans TC", sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('業績記錄表', 580, 120);
+      const x0 = 150, y0 = 220, cw = 300, ch = 110, nR = 4, nC = 4;
+      ctx.strokeStyle = '#000000'; ctx.lineWidth = 3;
+      for (let r = 0; r <= nR; r++) { ctx.beginPath(); ctx.moveTo(x0, y0 + r * ch); ctx.lineTo(x0 + nC * cw, y0 + r * ch); ctx.stroke(); }
+      for (let c = 0; c <= nC; c++) {
+        // 第 1、3 條直線在月份那一列沒有畫（合併儲存格）
+        const top = (c === 1 || c === 3) ? y0 + ch : y0;
+        ctx.beginPath(); ctx.moveTo(x0 + c * cw, top); ctx.lineTo(x0 + c * cw, y0 + nR * ch); ctx.stroke();
+      }
+      ctx.font = '40px "Microsoft JhengHei", "Noto Sans TC", sans-serif';
+      ctx.fillText('一月', x0 + cw - 40, y0 + ch / 2);
+      ctx.fillText('二月', x0 + 3 * cw - 40, y0 + ch / 2);
+      EXPECTED3.slice(2).forEach((row, r) => row.forEach((t, c) => ctx.fillText(t, x0 + c * cw + 20, y0 + (r + 1) * ch + ch / 2)));
+      return cv;
+    }
+
+    function canvasToImage(canvas) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.src = canvas.toDataURL('image/png');
+      });
+    }
+
+    function compare(name, rows, secs, preview, expectedRows = EXPECTED, merges = null, expectedMerges = null) {
+      const out = document.getElementById('out');
+      const h = document.createElement('h2');
+      const items = [];
+      const sameShape = rows.length === expectedRows.length && rows.every((r) => r.length === expectedRows[0].length);
+      items.push({ input: '列數 × 欄數', expected: `${expectedRows.length} × ${expectedRows[0].length}`, actual: `${rows.length} × ${rows[0]?.length ?? 0}`, ok: sameShape });
+      if (expectedMerges) {
+        const key = (ms) => JSON.stringify([...ms].map((m) => [m.r, m.c, m.rs, m.cs]).sort());
+        items.push({ input: '合併儲存格', expected: key(expectedMerges), actual: key(merges), ok: key(merges) === key(expectedMerges) });
+      }
+      expectedRows.forEach((row, r) => row.forEach((exp, c) => {
+        const act = rows[r]?.[c] ?? '(沒有這一格)';
+        items.push({ input: `第 ${r + 1} 列第 ${c + 1} 欄`, expected: exp, actual: act, ok: act === exp });
+      }));
+      const passed = items.filter((i) => i.ok).length;
+      h.textContent = `${name}：${passed} / ${items.length} 通過，耗時 ${secs} 秒`;
+      out.appendChild(h);
+      const t = document.createElement('table');
+      t.innerHTML = '<tr><th>測試項目</th><th>預期</th><th>實際</th><th>結果</th></tr>' + items.map((i) =>
+        `<tr><td>${i.input}</td><td>${i.expected}</td><td>${i.actual}</td><td class="${i.ok ? 'pass' : 'fail'}">${i.ok ? '一致' : '不一致'}</td></tr>`).join('');
+      out.appendChild(t);
+      out.appendChild(preview);
+      return { name, passed, total: items.length, items };
+    }
+
+    (async () => {
+      const results = [];
+      try {
+        const T0 = performance.now();
+        const log = (msg) => console.log(`[selftest ${((performance.now() - T0) / 1000).toFixed(1)}s] ${msg}`);
+        log('等 OpenCV');
+        const cv = await waitForOpenCV();
+        log('OpenCV 就緒，載入 PP-OCRv5');
+        const ocr = new PPOCR(cv, '../');
+        await ocr.init();
+        log('PP-OCRv5 就緒');
+        for (const [name, make] of [['測試 1：乾淨的表格', case1], ['測試 2：拍歪 4 度、深色背景', case2]]) {
+          const img = await canvasToImage(make());
+          const t0 = performance.now();
+          const res = await runPipeline(cv, ocr, img, (m) => log(`${name}：${m}`));
+          log(`${name}：完成`);
+          results.push(compare(name, res.rows, ((performance.now() - t0) / 1000).toFixed(1), res.preview));
+        }
+        {
+          const name = '測試 3：表格斜 2.5 度、上方有標題、合併儲存格';
+          const img = await canvasToImage(case3());
+          const t0 = performance.now();
+          const res = await runPipeline(cv, ocr, img, (m) => log(`${name}：${m}`));
+          log(`${name}：完成`);
+          window.selftestCase3 = res; // 除錯用
+          results.push(compare(name, res.rows, ((performance.now() - t0) / 1000).toFixed(1), res.preview, EXPECTED3, res.merges, MERGES3));
+        }
+        const blob = buildXlsxBlob(EXPECTED3, MERGES3);
+        const wb = window.XLSX.read(await blob.arrayBuffer());
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const back = window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+        const xlsxOk = JSON.stringify(back) === JSON.stringify(EXPECTED3);
+        const mergeBack = JSON.stringify(ws['!merges'] || []);
+        const mergeExp = JSON.stringify(MERGES3.map((m) => ({ s: { c: m.c, r: m.r }, e: { c: m.c + m.cs - 1, r: m.r + m.rs - 1 } })));
+        results.push({ name: '測試 4：匯出 .xlsx 再讀回', passed: (xlsxOk ? 1 : 0) + (mergeBack === mergeExp ? 1 : 0), total: 2, items: [
+          { input: '.xlsx 讀回內容', expected: JSON.stringify(EXPECTED3), actual: JSON.stringify(back), ok: xlsxOk },
+          { input: '.xlsx 讀回合併儲存格', expected: mergeExp, actual: mergeBack, ok: mergeBack === mergeExp },
+        ] });
+        document.getElementById('status').textContent = '完成';
+      } catch (err) {
+        console.error(err);
+        document.getElementById('status').textContent = `失敗：${err.message}`;
+        results.push({ error: err.message });
+      }
+      window.selftestResults = results;
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# 模型與 WebAssembly 一律當成二進位檔，不做換行轉換
+*.onnx binary
+*.wasm binary
+*.png binary
