@@ -20,15 +20,22 @@
 
   <main>
     <section class="actions">
-      <label class="button primary">
-        拍照
-        <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
-      </label>
+      <button id="camera-button" class="button primary" type="button" disabled>拍照</button>
+      <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
       <label class="button">
         從相簿選擇
         <input id="file-input" type="file" accept="image/*" hidden>
       </label>
     </section>
+
+    <!-- 網頁內的相機畫面 -->
+    <div id="camera-view" class="camera-view" hidden>
+      <video id="camera-video" autoplay playsinline muted></video>
+      <div class="camera-actions">
+        <button id="camera-cancel" class="button" type="button">取消</button>
+        <button id="camera-shoot" class="button primary" type="button">拍下</button>
+      </div>
+    </div>
 
     <section>
       <p id="engine-status" class="status">載入辨識引擎中…</p>

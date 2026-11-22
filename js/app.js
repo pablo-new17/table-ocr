@@ -14,7 +14,11 @@ const resultTable = $('result-table');
 const exportButton = $('export-xlsx');
 const reviewSection = $('review-section');
 const reviewList = $('review-list');
-const inputs = [$('camera-input'), $('file-input')];
+const cameraButton = $('camera-button');
+const cameraInput = $('camera-input');
+const inputs = [cameraInput, $('file-input')];
+// 處理照片時要一起停用的按鈕與選擇框
+const controls = [cameraButton, ...inputs];
 
 // 信心分數低於這個值的文字，列在「可能辨識錯誤」清單裡
 const LOW_SCORE = 0.8;
@@ -65,7 +69,7 @@ let cv = null;
 let ocr = null;
 
 async function setupEngine() {
-  inputs.forEach((i) => { i.disabled = true; });
+  controls.forEach((i) => { i.disabled = true; });
   try {
     setStatus(engineStatus, '載入 OpenCV 中…');
     cv = await waitForOpenCV();
@@ -74,7 +78,7 @@ async function setupEngine() {
     await engine.init();
     ocr = engine; // 模型全部載入完才設定，避免還沒載入完就開始辨識
     setStatus(engineStatus, '辨識引擎已就緒', 'ok');
-    inputs.forEach((i) => { i.disabled = false; });
+    controls.forEach((i) => { i.disabled = false; });
   } catch (err) {
     console.error(err);
     setStatus(engineStatus, `辨識引擎載入失敗：${err.message}`, 'error');
@@ -236,7 +240,7 @@ function loadImage(file) {
 
 async function handleFile(file) {
   if (!file || !ocr) return;
-  inputs.forEach((i) => { i.disabled = true; });
+  controls.forEach((i) => { i.disabled = true; });
   const started = performance.now();
   try {
     const img = await loadImage(file);
@@ -263,11 +267,63 @@ async function handleFile(file) {
     console.error(err);
     setStatus(progress, `處理失敗：${err.message}`, 'error');
   } finally {
-    inputs.forEach((i) => { i.disabled = false; i.value = ''; });
+    controls.forEach((i) => { i.disabled = false; });
+    inputs.forEach((i) => { i.value = ''; });
   }
 }
 
 inputs.forEach((input) => input.addEventListener('change', () => handleFile(input.files[0])));
+
+// ---- 網頁內的相機 ----
+// 有些手機（例如新版 Android 的 Chrome）會忽略 <input capture>，改開相簿選擇框，
+// 所以「拍照」直接用 getUserMedia 在網頁裡開後鏡頭。開不了時才退回 <input capture>。
+const cameraView = $('camera-view');
+const cameraVideo = $('camera-video');
+let cameraStream = null;
+
+function stopCamera() {
+  cameraStream?.getTracks().forEach((t) => t.stop());
+  cameraStream = null;
+  cameraVideo.srcObject = null;
+  cameraView.hidden = true;
+}
+
+cameraButton.addEventListener('click', async () => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    cameraInput.click();
+    return;
+  }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+    });
+    cameraVideo.srcObject = cameraStream;
+    cameraView.hidden = false;
+    await cameraVideo.play();
+  } catch (err) {
+    stopCamera();
+    console.error(err);
+    const reason = err.name === 'NotAllowedError' ? '沒有相機權限' : `無法開啟相機（${err.name}）`;
+    setStatus(progress, `${reason}，改用手機的拍照程式`, 'error');
+    cameraInput.click();
+  }
+});
+
+$('camera-cancel').addEventListener('click', stopCamera);
+
+$('camera-shoot').addEventListener('click', async () => {
+  const w = cameraVideo.videoWidth;
+  const h = cameraVideo.videoHeight;
+  if (!w || !h) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d').drawImage(cameraVideo, 0, 0, w, h);
+  stopCamera();
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+  await handleFile(new File([blob], 'camera.jpg', { type: 'image/jpeg' }));
+});
 
 // 給測試頁用
 window.tableOcr = { handleFile, readTable, get merges() { return currentMerges; }, get ready() { return !!ocr; } };
