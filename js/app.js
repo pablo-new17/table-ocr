@@ -47,6 +47,16 @@ async function setupOffline() {
     const hits = await Promise.all(REQUIRED.map((p) => caches.match(new URL(p, location.href).href)));
     return hits.every(Boolean);
   };
+  // 網站更新後，新版 Service Worker 接手時自動重新整理一次，畫面才會是新版。
+  // 第一次打開（原本沒有 Service Worker）不需要重新整理。
+  if (navigator.serviceWorker.controller) {
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
+  }
   try {
     const reg = await navigator.serviceWorker.register('sw.js');
     const update = async () => {
