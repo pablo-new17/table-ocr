@@ -298,8 +298,23 @@ function stopCamera() {
   cameraView.hidden = true;
 }
 
+// 版本號跟 sw.js 的 CACHE_VERSION 一樣，畫面上看得到現在是哪一版
+const APP_VERSION = 9;
+$('app-version').textContent = `版本 ${APP_VERSION}`;
+
+// 一打開就檢查這個瀏覽器能不能在網頁內開相機，不能的話寫出原因
+const cameraStatus = $('camera-status');
+if (!window.isSecureContext) {
+  setStatus(cameraStatus, '相機：網址不是 https，瀏覽器不允許開相機', 'error');
+} else if (!navigator.mediaDevices?.getUserMedia) {
+  setStatus(cameraStatus, '相機：這個瀏覽器不支援網頁內開相機（可能是 LINE 等 App 內建的瀏覽器），請用 Chrome 或 Safari 打開這個網址', 'error');
+} else {
+  setStatus(cameraStatus, '相機：可以在網頁內開相機');
+}
+
 cameraButton.addEventListener('click', async () => {
   if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus(progress, '這個瀏覽器不支援網頁內開相機，改用手機的選擇框', 'error');
     cameraInput.click();
     return;
   }
@@ -314,7 +329,9 @@ cameraButton.addEventListener('click', async () => {
   } catch (err) {
     stopCamera();
     console.error(err);
-    const reason = err.name === 'NotAllowedError' ? '沒有相機權限' : `無法開啟相機（${err.name}）`;
+    const reason = err.name === 'NotAllowedError'
+      ? '沒有相機權限（請到瀏覽器的網站設定，把這個網站的相機改成允許）'
+      : `無法開啟相機（${err.name}：${err.message}）`;
     setStatus(progress, `${reason}，改用手機的拍照程式`, 'error');
     cameraInput.click();
   }
