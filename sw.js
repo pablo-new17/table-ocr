@@ -1,6 +1,6 @@
 // Service Worker：第一次連線時把所有檔案存進 cache，之後全部從 cache 讀取，斷線也能用。
 // 改了任何檔案就把 CACHE_VERSION 加 1，手機才會下載新版。
-const CACHE_VERSION = 9;
+const CACHE_VERSION = 10;
 const CACHE_NAME = `table-ocr-v${CACHE_VERSION}`;
 
 const ASSETS = [

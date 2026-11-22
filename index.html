@@ -45,7 +45,11 @@
 
     <section id="preview-section" hidden>
       <h2>偵測結果</h2>
-      <p class="hint">紅線是找到的表格框線，藍框是找到的文字。</p>
+      <p class="hint">紅線是找到的表格框線，藍框是找到的文字。照片方向不對時，可以轉 90 度再辨識一次。</p>
+      <div class="actions">
+        <button id="rotate-left" class="button" type="button">向左轉 90° 再辨識</button>
+        <button id="rotate-right" class="button" type="button">向右轉 90° 再辨識</button>
+      </div>
       <canvas id="preview"></canvas>
     </section>
 

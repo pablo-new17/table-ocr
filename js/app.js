@@ -18,7 +18,7 @@ const cameraButton = $('camera-button');
 const cameraInput = $('camera-input');
 const inputs = [cameraInput, $('file-input')];
 // 處理照片時要一起停用的按鈕與選擇框
-const controls = [cameraButton, ...inputs];
+const controls = [cameraButton, ...inputs, $('rotate-left'), $('rotate-right')];
 
 // 信心分數低於這個值的文字，列在「可能辨識錯誤」清單裡
 const LOW_SCORE = 0.8;
@@ -248,12 +248,44 @@ function loadImage(file) {
   });
 }
 
+// 最近一次辨識用的照片（旋轉時用）
+let lastImage = null;
+
+// 把照片轉 90 度（clockwise=true 向右轉），回傳新的 canvas
+function rotate90(image, clockwise) {
+  const w = image.naturalWidth || image.width;
+  const h = image.naturalHeight || image.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = h;
+  canvas.height = w;
+  const ctx = canvas.getContext('2d');
+  if (clockwise) {
+    ctx.translate(h, 0);
+    ctx.rotate(Math.PI / 2);
+  } else {
+    ctx.translate(0, w);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.drawImage(image, 0, 0, w, h);
+  return canvas;
+}
+
 async function handleFile(file) {
   if (!file || !ocr) return;
+  try {
+    await handleImage(await loadImage(file));
+  } catch (err) {
+    console.error(err);
+    setStatus(progress, `處理失敗：${err.message}`, 'error');
+  }
+}
+
+async function handleImage(img) {
+  if (!img || !ocr) return;
+  lastImage = img;
   controls.forEach((i) => { i.disabled = true; });
   const started = performance.now();
   try {
-    const img = await loadImage(file);
     const result = await runPipeline(cv, ocr, img, (msg) => setStatus(progress, `${msg}…`), LOW_SCORE);
 
     previewCanvas.width = result.preview.width;
@@ -284,6 +316,10 @@ async function handleFile(file) {
 
 inputs.forEach((input) => input.addEventListener('change', () => handleFile(input.files[0])));
 
+// 把上一張照片轉 90 度再辨識一次
+$('rotate-left').addEventListener('click', () => lastImage && handleImage(rotate90(lastImage, false)));
+$('rotate-right').addEventListener('click', () => lastImage && handleImage(rotate90(lastImage, true)));
+
 // ---- 網頁內的相機 ----
 // 有些手機（例如新版 Android 的 Chrome）會忽略 <input capture>，改開相簿選擇框，
 // 所以「拍照」直接用 getUserMedia 在網頁裡開後鏡頭。開不了時才退回 <input capture>。
@@ -299,7 +335,7 @@ function stopCamera() {
 }
 
 // 版本號跟 sw.js 的 CACHE_VERSION 一樣，畫面上看得到現在是哪一版
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 $('app-version').textContent = `版本 ${APP_VERSION}`;
 
 // 一打開就檢查這個瀏覽器能不能在網頁內開相機，不能的話寫出原因
@@ -353,7 +389,7 @@ $('camera-shoot').addEventListener('click', async () => {
 });
 
 // 給測試頁用
-window.tableOcr = { handleFile, readTable, get merges() { return currentMerges; }, get ready() { return !!ocr; } };
+window.tableOcr = { handleFile, handleImage, readTable, get merges() { return currentMerges; }, get ready() { return !!ocr; } };
 
 setupOffline();
 setupEngine();
