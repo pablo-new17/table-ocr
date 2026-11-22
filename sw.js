@@ -1,6 +1,6 @@
 // Service Worker：第一次連線時把所有檔案存進 cache，之後全部從 cache 讀取，斷線也能用。
 // 改了任何檔案就把 CACHE_VERSION 加 1，手機才會下載新版。
-const CACHE_VERSION = 7;
+const CACHE_VERSION = 8;
 const CACHE_NAME = `table-ocr-v${CACHE_VERSION}`;
 
 const ASSETS = [
@@ -30,7 +30,9 @@ const ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+      // cache: 'reload'：不用瀏覽器的 HTTP 快取，一律向網站拿最新的檔案
+      // （GitHub Pages 會讓瀏覽器把檔案快取 10 分鐘，不加這個會存到舊檔）
+      .then((cache) => cache.addAll(ASSETS.map((url) => new Request(url, { cache: 'reload' }))))
       .then(() => self.skipWaiting()),
   );
 });
